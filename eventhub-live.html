@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>EventHub</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+:root{--bg:#ecf8ee;--card:#fff;--text:#0f2e1a;--muted:#4b6b57;--pri:#14532d;--onpri:#f0fdf4;--acc:#86efac;--line:#c6e7cf;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#06210f;--card:#0d3319;--text:#e6fbe9;--muted:#9bc9a8;--pri:#86efac;--onpri:#052e12;--acc:#14532d;--line:#1b4d2b}}
+:root[data-theme="dark"]{--bg:#06210f;--card:#0d3319;--text:#e6fbe9;--muted:#9bc9a8;--pri:#86efac;--onpri:#052e12;--acc:#14532d;--line:#1b4d2b}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.5}
+header{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 20px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
+header button{padding:6px 10px;font-size:14px}.logo{font-weight:800;font-size:20px;color:var(--pri);margin-right:auto}
+main{max-width:1000px;margin:0 auto;padding:24px 20px 60px}h1,h2{color:var(--pri)}h1{margin-top:0}
+button{font:inherit;cursor:pointer;border:0;border-radius:8px;padding:8px 14px;background:var(--pri);color:var(--onpri);font-weight:600}
+button:disabled{opacity:.5;cursor:not-allowed}.ghost{background:transparent;color:var(--pri);border:1px solid var(--pri)}.on{background:var(--acc);color:var(--text)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px}
+.meta{color:var(--muted);font-size:14px}.err{color:#dc2626;font-size:14px;min-height:20px}.badge{background:var(--acc);color:var(--text);border-radius:99px;padding:2px 10px;font-size:13px;font-weight:600}
+label{display:block;font-size:14px;font-weight:600;margin:12px 0 4px}
+input,select,textarea{width:100%;padding:9px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit}
+form{max-width:460px}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.row>*{flex:1;min-width:110px}
+.bar{height:6px;background:var(--line);border-radius:9px;overflow:hidden;margin:8px 0}.bar i{display:block;height:100%;background:var(--pri)}
+#toast{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);background:var(--pri);color:var(--onpri);padding:10px 18px;border-radius:10px;display:none;z-index:9}
+.tot{display:flex;justify-content:space-between;gap:8px}.big{font-weight:800;font-size:18px}
+</style></head>
+<body><header id="hd"></header><main id="app"></main><div id="toast"></div>
+<div id="warn" class="card err" style="display:none;margin:12px 20px">Your browser is blocking storage, so accounts will not be saved. Open the downloaded file in Chrome, Edge or Firefox (not a private window).</div>
+<script>
+const K="eventhub_demo_v1",D=864e5;
+let canStore=true;try{localStorage.setItem("_t","1");localStorage.removeItem("_t")}catch(e){canStore=false}
+let db;try{db=JSON.parse(localStorage.getItem(K))}catch(e){}
+if(!db){const t=n=>Date.now()+n*D;db={me:null,cart:[],bookings:[],users:[{id:"u0",name:"Admin",email:"admin@eventhub.com",pw:"admin123",role:"admin",verified:true}],events:[
+{id:"e1",title:"Tech Symposium",cat:"Tech",venue:"Mumbai Convention Hall",date:t(14),price:600,cap:120,desc:"Talks and demos on software, hardware and startups."},
+{id:"e2",title:"AI Workshop",cat:"Workshop",venue:"Innovation Lab, Powai",date:t(21),price:900,cap:40,desc:"A hands-on day building with AI tools."},
+{id:"e3",title:"Sports Meet",cat:"Sports",venue:"City Stadium",date:t(30),price:300,cap:300,desc:"Inter-college tournament."}]}}
+db.promos=db.promos||[{code:"STUDENT10",pct:10,on:true},{code:"WELCOME5",pct:5,on:true}];db.wait=db.wait||[];
+const save=()=>{try{localStorage.setItem(K,JSON.stringify(db))}catch(e){}};
+const ui={tab:"home",cal:{y:new Date().getFullYear(),m:new Date().getMonth(),sel:null},sub:"dash",bf:"all",promo:"",edit:null,dr:"any",mp:"",fr:false,q:"",cat:"All",sort:"date",id:null,reg:false,err:"",code:null,sent:null,skip:false,open:null};
+const $=s=>document.querySelector(s),root=document.documentElement;
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt=d=>new Date(d).toLocaleString("en-IN",{dateStyle:"medium",timeStyle:"short"});
+const li=d=>new Date(d-new Date().getTimezoneOffset()*6e4).toISOString().slice(0,16);
+const me=()=>db.users.find(u=>u.id===db.me);
+const booked=e=>db.bookings.filter(b=>b.status!=="cancelled").reduce((a,b)=>a+b.items.filter(i=>i.eid===e.id).reduce((x,i)=>x+i.q,0),0);
+const sorted=()=>[...db.events].sort((a,b)=>a.date-b.date);
+const toast=m=>{const t=$("#toast");t.textContent=m;t.style.display="block";setTimeout(()=>t.style.display="none",2400)};
+try{const t=localStorage.getItem("ehTheme");if(t)root.setAttribute("data-theme",t)}catch(e){}
+function theme(){const dk=root.getAttribute("data-theme")?root.getAttribute("data-theme")==="dark":matchMedia("(prefers-color-scheme:dark)").matches;const n=dk?"light":"dark";root.setAttribute("data-theme",n);try{localStorage.setItem("ehTheme",n)}catch(e){}}
+const go=t=>{ui.tab=t;ui.open=null;render();if(t==="alerts"){(me().notes||[]).forEach(n=>n.read=true);save()}};
+function logout(){ui.tab="home";db.me=null;ui.skip=false;ui.sent=null;save();render()}
+
+function auth(e){e.preventDefault();const f=e.target.elements,em=f.email.value.trim().toLowerCase();ui.err="";
+if(ui.reg){if(f.pw.value.length<6)ui.err="Password needs 6+ characters.";else if(db.users.find(u=>u.email===em))ui.err="Email already registered.";
+else{const u={id:"u"+Date.now(),name:f.name.value.trim(),email:em,pw:f.pw.value,role:"user",verified:false};db.users.push(u);db.me=u.id;welcome(u.id)}}
+else{const u=db.users.find(u=>u.email===em&&u.pw===f.pw.value);if(u)db.me=u.id;else ui.err="Wrong email or password."}
+save();render()}
+function sendCode(e){e.preventDefault();const f=e.target.elements,u=me();u.college=f.college.value.trim();u.sid=f.sid.value.trim();ui.code=String(Math.floor(1e5+Math.random()*9e5));ui.sent=true;ui.err="";save();render()}
+function confirmCode(e){e.preventDefault();if(e.target.elements.code.value.trim()===ui.code){me().verified=true;ui.sent=null;notify(db.me,"Student discount unlocked: 20% off every ticket");save();toast("Student discount unlocked");render()}else{ui.err="Incorrect code.";render()}}
+function add(id,n=1){const c=db.cart.find(x=>x.id===id);c?c.q=Math.min(10,c.q+n):db.cart.push({id,q:n});save();toast("Added to cart");render()}
+function qty(id,d){const c=db.cart.find(x=>x.id===id);c.q=Math.max(1,Math.min(10,c.q+d));save();render()}
+function rm(id){db.cart=db.cart.filter(x=>x.id!==id);save();render()}
+function payM(){const m=$("#pm").value;$("#card").style.display=m==="card"?"block":"none";$("#upi").style.display=m==="upi"?"block":"none"}
+function checkout(e){e.preventDefault();const f=e.target.elements,u=me(),m=f.pm.value,items=[];let sub=0,ref;ui.err="";
+for(const c of db.cart){const ev=db.events.find(x=>x.id===c.id);if(!ev)continue;const left=ev.cap-booked(ev);
+if(c.q>left){ui.err=`${ev.title} has only ${left} seats left.`;return render()}
+items.push({eid:ev.id,title:ev.title,date:ev.date,q:c.q,price:ev.price});sub+=ev.price*c.q}
+if(m==="card"){const n=f.cn.value.replace(/\s/g,"");if(!/^\d{12,19}$/.test(n)){ui.err="Enter a valid card number.";return render()}ref="•••• "+n.slice(-4)}
+else{if(!f.upi.value.includes("@")){ui.err="Enter a valid UPI ID.";return render()}ref=f.upi.value}
+const disc=calc(items.map(i=>({price:i.price,q:i.q}))).disc;
+db.bookings.push({id:"B"+Date.now().toString(36).toUpperCase(),uid:u.id,items,sub,disc,total:sub-disc,pay:{m,ref},at:Date.now()});notify(u.id,"Booking confirmed: "+items.map(i=>i.title).join(", "));ui.promo="";db.cart=[];save();ui.tab="history";toast("Payment successful");render()}
+function addEv(e){e.preventDefault();const f=e.target.elements;db.events.push({id:"e"+Date.now(),title:f.title.value.trim(),cat:f.cat.value,venue:f.venue.value.trim(),date:new Date(f.date.value).getTime(),price:+f.price.value,cap:+f.cap.value,desc:f.desc.value.trim()});save();toast("Event scheduled");render()}
+function resched(id,v){if(!v)return;const e=db.events.find(x=>x.id===id);e.date=new Date(v).getTime();db.bookings.filter(b=>b.status!=="cancelled"&&b.items.some(i=>i.eid===id)).forEach(b=>notify(b.uid,`${e.title} was rescheduled to ${fmt(e.date)}`));save();toast("Rescheduled");render()}
+function delEv(id){if(confirm("Delete this event?")){db.events=db.events.filter(x=>x.id!==id);db.cart=db.cart.filter(c=>c.id!==id);save();render()}}
+const who=id=>{ui.open=ui.open===id?null:id;render()};
+
+const pt=e=>{const u=me();return u&&u.verified&&u.role!=="admin"?`<s class="meta">₹${e.price}</s> ₹${Math.round(e.price*.8)}`:"₹"+e.price};
+function card(e){const b=booked(e),l=e.cap-b,n=(db.cart.find(c=>c.id===e.id)||{}).q,sv=(me().saved||[]).includes(e.id),wt=db.wait.some(w=>w.eid===e.id&&w.uid===db.me);
+return `<div class="card"><span class="badge">${esc(e.cat)}</span><h3><a href="#" onclick="openEv('${e.id}');return false" style="color:inherit;text-decoration:none">${esc(e.title)}</a></h3><div class="meta">${fmt(e.date)} · ${esc(e.venue)}</div>
+<div class="bar"><i style="width:${Math.min(100,b/e.cap*100)}%"></i></div><div class="meta">${b} booked · ${l>0?(l<=20?"Only "+l+" seats left":l+" seats left"):"Sold out"}</div><p><b>${pt(e)}</b></p>
+<button class="ghost" onclick="openEv('${e.id}')">Details</button> <button class="ghost" title="Save" onclick="fav('${e.id}')">${sv?"♥":"♡"}</button> ${l>0?`<button onclick="add('${e.id}')">Add to cart${n?" ("+n+")":""}</button>`:`<button onclick="joinWait('${e.id}')">${wt?"On waitlist ✓":"Join waitlist"}</button>`}</div>`}
+function grid(){const now=Date.now(),inR=e=>{if(ui.dr==="any")return true;if(ui.dr==="wk"){const d=new Date(e.date).getDay();return e.date>now&&e.date<now+7*D&&(d===0||d===6)}return e.date>now&&e.date<now+ +ui.dr*D};
+const a=sorted().filter(e=>(ui.cat==="All"||e.cat===ui.cat)&&(e.title+" "+e.venue+" "+e.cat).toLowerCase().includes(ui.q.toLowerCase())&&inR(e)&&(ui.mp===""||e.price<=+ui.mp)&&(!ui.fr||e.price===0));if(ui.sort==="price")a.sort((x,y)=>x.price-y.price);return a.length?a.map(card).join(""):'<p class="meta">No events match your filters.</p>'}
+function filt(){ui.q=$("#q").value;ui.cat=$("#cat").value;ui.sort=$("#so").value;ui.dr=$("#dr").value;ui.mp=$("#mp").value;ui.fr=$("#fr").checked;$("#grid").innerHTML=grid()}
+function openEv(id){ui.id=id;ui.tab="detail";render()}
+function cancelB(id){if(!confirm("Cancel this booking and get a refund?"))return;const b=db.bookings.find(b=>b.id===id);b.status="cancelled";notify(b.uid,`Refund of ₹${b.total} initiated for ${b.id}`);
+b.items.forEach(i=>{const e=db.events.find(x=>x.id===i.eid);if(e&&e.cap-booked(e)>0)db.wait.filter(w=>w.eid===e.id).forEach(w=>notify(w.uid,`Seats are open for ${e.title}. Book now!`))});save();toast("Refund initiated");render()}
+function drawQR(){if(ui.tab==="history"&&window.QRCode)db.bookings.filter(b=>b.uid===db.me&&b.status!=="cancelled").forEach(b=>{const el=$("#qr"+b.id);if(el)new QRCode(el,{text:b.id+"|"+b.items.map(i=>i.title+"x"+i.q).join(","),width:110,height:110})})}
+function restore(e){e.preventDefault();try{const x=JSON.parse(e.target.elements.j.value);if(!Array.isArray(x.users))throw 0;["users","events","bookings"].forEach(k=>(x[k]||[]).forEach(it=>{if(!db[k].some(y=>y.id===it.id))db[k].push(it)}));save();toast("Backup restored");render()}catch(err){toast("That backup text is not valid")}}
+function notify(uid,m){const u=db.users.find(x=>x.id===uid);if(!u)return;(u.notes=u.notes||[]).unshift({m,at:Date.now(),read:false})}
+function calc(r){const u=me(),sub=r.reduce((a,x)=>a+x.price*x.q,0),n=r.reduce((a,x)=>a+x.q,0),pr=db.promos.find(p=>p.code===ui.promo&&p.on),P=[];
+if(u.verified&&u.role!=="admin")P.push(["Student discount (20%)",20]);if(n>=5)P.push(["Group discount (5%)",5]);if(pr)P.push([`Promo ${pr.code} (${pr.pct}%)`,pr.pct]);
+let disc=0,lines="";P.forEach(([l,p])=>{const d=Math.round(sub*p/100);disc+=d;lines+=`<div class="tot"><span>${l}</span><span>−₹${d}</span></div>`});disc=Math.min(disc,sub);return{sub,disc,lines,total:sub-disc}}
+function applyPromo(){const c=$("#pc").value.trim().toUpperCase();ui.promo=db.promos.some(x=>x.code===c&&x.on)?c:"";toast(ui.promo?"Promo applied":"Invalid promo code");render()}
+function fav(id){const u=me();u.saved=u.saved||[];const i=u.saved.indexOf(id);i>=0?u.saved.splice(i,1):u.saved.push(id);save();render()}
+function joinWait(id){const i=db.wait.findIndex(w=>w.eid===id&&w.uid===db.me);i>=0?db.wait.splice(i,1):db.wait.push({eid:id,uid:db.me});save();toast(i>=0?"Left waitlist":"You are on the waitlist");render()}
+function rebook(id){db.bookings.find(b=>b.id===id).items.forEach(i=>{if(db.events.find(e=>e.id===i.eid))add(i.eid,i.q)});go("cart")}
+function calMove(d){const c=ui.cal;c.m+=d;if(c.m>11){c.m=0;c.y++}if(c.m<0){c.m=11;c.y--}c.sel=null;render()}
+function saveProfile(e){e.preventDefault();const f=e.target.elements,u=me();if(f.name.value.trim())u.name=f.name.value.trim();if(f.pw.value){if(f.pw.value.length<6)return toast("Password needs 6+ characters");u.pw=f.pw.value}save();toast("Profile updated");render()}
+function editForm(e){return `<form onsubmit="saveEv(event,'${e.id}')" style="margin-top:10px"><label>Title</label><input name="title" value="${esc(e.title)}" required><label>Venue</label><input name="venue" value="${esc(e.venue)}" required>
+<div class="row"><div><label>Price (₹)</label><input name="price" type="number" min="0" value="${e.price}"></div><div><label>Capacity</label><input name="cap" type="number" min="1" value="${e.cap}"></div></div><label>Description</label><textarea name="desc">${esc(e.desc)}</textarea><p><button>Save changes</button></p></form>`}
+function saveEv(e,id){e.preventDefault();const f=e.target.elements,v=db.events.find(x=>x.id===id);Object.assign(v,{title:f.title.value.trim(),venue:f.venue.value.trim(),price:+f.price.value,cap:+f.cap.value,desc:f.desc.value.trim()});ui.edit=null;save();toast("Event updated");render()}
+const bars=a=>{const m=Math.max(1,...a.map(x=>x[1]));return a.map(([l,v])=>`<div class="meta">${esc(l)} · ${v}</div><div class="bar"><i style="width:${v/m*100}%"></i></div>`).join("")||'<p class="meta">No data yet.</p>'};
+function aDash(){const A=db.bookings.filter(b=>b.status!=="cancelled"),rev=A.reduce((a,b)=>a+b.total,0),sid=db.users.filter(u=>u.verified&&u.role!=="admin").map(u=>u.id),stu=A.filter(b=>sid.includes(b.uid)).reduce((a,b)=>a+b.total,0);
+const per=db.events.map(e=>[e.title,A.reduce((a,b)=>a+b.items.filter(i=>i.eid===e.id).reduce((x,i)=>x+i.q*i.price,0),0)]),days=[];
+for(let i=6;i>=0;i--){const d=new Date(Date.now()-i*D).toDateString();days.push([d.slice(0,10),A.filter(b=>new Date(b.at).toDateString()===d).length])}
+return `<h1>Dashboard</h1><div class="grid"><div class="card"><b>${A.length}</b><div class="meta">active bookings</div></div><div class="card"><b>₹${rev}</b><div class="meta">revenue</div></div><div class="card"><b>${sid.length}</b><div class="meta">verified students</div></div></div><h2>Bookings, last 7 days</h2>${bars(days)}<h2>Revenue per event (₹)</h2>${bars(per)}<h2>Student vs other revenue (₹)</h2>${bars([["Verified students",stu],["Other",rev-stu]])}`}
+function arrive(id){const b=db.bookings.find(x=>x.id===id);b.arrived=!b.arrived;save();render()}
+function aCheck(){const A=db.bookings.filter(b=>b.status!=="cancelled"),U=b=>db.users.find(x=>x.id===b.uid)||{};
+const rows=A.map(b=>`<div class="card row"><div><b>${esc(U(b).name||"?")}</b><div class="meta">${esc(b.id)} · ${b.items.map(i=>esc(i.title)+" ×"+i.q).join(", ")}</div></div><button class="${b.arrived?"on":"ghost"}" onclick="arrive('${b.id}')">${b.arrived?"Arrived ✓":"Mark arrived"}</button></div>`).join("");
+const q=x=>'"'+String(x==null?"":x).replace(/"/g,'""')+'"',csv="name,email,college,event,tickets,arrived\n"+A.flatMap(b=>b.items.map(i=>[U(b).name,U(b).email,U(b).college,i.title,i.q,b.arrived?"yes":"no"].map(q).join(","))).join("\n");
+return `<h1>Check-in</h1>${rows||'<p class="meta">No bookings yet.</p>'}<h2>Attendee list (CSV)</h2><textarea readonly rows="6" onclick="this.select()">${esc(csv)}</textarea><p class="meta">Click the box, copy, and paste into Excel or Sheets.</p>`}
+function revoke(id){const u=db.users.find(x=>x.id===id);u.verified=false;notify(id,"Your student verification was revoked");save();toast("Verification revoked");render()}
+function aStu(){const L=db.users.filter(u=>u.verified&&u.role!=="admin");return `<h1>Verified students</h1>${L.length?L.map(u=>`<div class="card row"><div><b>${esc(u.name)}</b><div class="meta">${esc(u.email)} · ${esc(u.college||"")} · ID ${esc(u.sid||"")}</div></div><button class="ghost" onclick="revoke('${u.id}')">Revoke</button></div>`).join(""):'<p class="meta">No verified students yet.</p>'}`}
+function togPromo(c){const p=db.promos.find(x=>x.code===c);p.on=!p.on;save();render()}
+function addPromo(e){e.preventDefault();const f=e.target.elements,c=f.code.value.toUpperCase().replace(/[^A-Z0-9]/g,"");if(!c||db.promos.some(p=>p.code===c))return toast("Code is empty or already exists");db.promos.push({code:c,pct:Math.min(50,+f.pct.value||5),on:true});save();render()}
+function aPromo(){return `<h1>Promo codes</h1>${db.promos.map(p=>`<div class="card row"><div><b>${esc(p.code)}</b><div class="meta">${p.pct}% off</div></div><button class="${p.on?"on":"ghost"}" onclick="togPromo('${p.code}')">${p.on?"Active":"Disabled"}</button></div>`).join("")}<form onsubmit="addPromo(event)"><label>New code</label><input name="code" required><label>Discount %</label><input name="pct" type="number" min="1" max="50" value="10"><p><button>Create code</button></p></form>`}
+const V={
+home:()=>{const u=me(),up=sorted().filter(e=>e.date>Date.now()),wk=up.filter(e=>e.date<Date.now()+7*D),cats=["Tech","Workshop","Sports","Business","Culture"];
+return `<div class="card" style="background:linear-gradient(135deg,var(--pri),var(--acc));border:0"><h1 style="color:var(--onpri)">Find your next event</h1><p style="color:var(--onpri)">Book campus and city events. Verified students save 20%.</p><button class="on" onclick="go('events')">Browse events</button></div>
+<h2>Happening this week</h2>${wk.length?`<div class="grid">${wk.map(card).join("")}</div>`:'<p class="meta">Nothing in the next 7 days.</p>'}<h2>Top categories</h2><div class="row">${cats.map(c=>`<button class="ghost" onclick="ui.cat='${c}';go('events')">${c} (${db.events.filter(e=>e.cat===c).length})</button>`).join("")}</div>
+${!u.verified&&u.role!=="admin"?`<div class="card" style="margin-top:16px"><b>Why verify as a student?</b><p class="meta">20% off every ticket, and it takes under a minute.</p><button onclick="ui.skip=false;render()">Verify now</button></div>`:""}`},
+calendar:()=>{const c=ui.cal,pad=new Date(c.y,c.m,1).getDay(),dn=new Date(c.y,c.m+1,0).getDate(),on=d=>db.events.filter(e=>{const x=new Date(e.date);return x.getFullYear()===c.y&&x.getMonth()===c.m&&x.getDate()===d}),mn=new Date(c.y,c.m).toLocaleString("en-IN",{month:"long",year:"numeric"}),all=sorted().filter(e=>{const x=new Date(e.date);return x.getFullYear()===c.y&&x.getMonth()===c.m});
+let cells="";for(let i=0;i<pad;i++)cells+="<div></div>";for(let d=1;d<=dn;d++)cells+=`<button class="${c.sel===d?"on":"ghost"}" style="padding:8px 0" onclick="ui.cal.sel=${d};render()">${d}${on(d).length?" •":""}</button>`;
+return `<h1>Calendar</h1><div class="row" style="margin-bottom:12px"><button class="ghost" onclick="calMove(-1)">←</button><b style="text-align:center">${mn}</b><button class="ghost" onclick="calMove(1)">→</button></div>
+<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center" class="meta">${"SMTWTFS".split("").map(x=>`<div>${x}</div>`).join("")}${cells}</div>
+${c.sel?`<h2>${c.sel} ${mn}</h2>${on(c.sel).length?`<div class="grid">${on(c.sel).map(card).join("")}</div>`:'<p class="meta">No events on this day.</p>'}`:`<p class="meta">Pick a day, or browse this month's events below (• marks event days).</p>${all.length?`<div class="grid">${all.map(card).join("")}</div>`:'<p class="meta">No events this month. Try the next month.</p>'}`}`},
+saved:()=>{const l=sorted().filter(e=>(me().saved||[]).includes(e.id));return `<h1>Saved events</h1>${l.length?`<div class="grid">${l.map(e=>`<div>${card(e)}<div class="meta" style="margin:-6px 0 12px">${e.date>Date.now()?"In "+Math.ceil((e.date-Date.now())/D)+" day(s)":"Already happened"}</div></div>`).join("")}</div>`:'<p class="meta">Tap the heart on an event to save it here.</p>'+sug()}`},
+alerts:()=>{const l=me().notes||[];return `<h1>Notifications</h1>${l.length?l.map(n=>`<div class="card"><div>${esc(n.m)} ${n.read?"":'<span class="badge">new</span>'}</div><div class="meta">${fmt(n.at)}</div></div>`).join(""):'<p class="meta">No notifications yet.</p>'}`},
+profile:()=>{const u=me();return `<h1>Profile</h1><div class="card"><b>${esc(u.name)}</b> ${u.verified&&u.role!=="admin"?'<span class="badge">Student ✓</span>':""}<div class="meta">${esc(u.email)}</div><div class="meta">${u.verified?esc(u.college||""):"Not verified as a student"}</div></div>
+<form onsubmit="saveProfile(event)"><label>Name</label><input name="name" value="${esc(u.name)}"><label>New password (leave blank to keep)</label><input name="pw" type="password"><p><button>Save</button> ${!u.verified&&u.role!=="admin"?'<button type="button" class="ghost" onclick="ui.skip=false;render()">Verify as student</button>':""}</p></form><h2>Backup and restore</h2><p class="meta">Your account is saved in this browser. To move it to another browser or device, copy this text there and restore it. It contains account data, so keep it private.</p>
+<textarea readonly rows="3" onclick="this.select()">${esc(JSON.stringify({users:db.users,events:db.events,bookings:db.bookings}))}</textarea>
+<form onsubmit="restore(event)"><label>Paste a backup to restore</label><textarea name="j" rows="3" required></textarea><p><button>Restore</button></p></form>`},
+help:()=>`<h1>Help and FAQ</h1>${[["How do I get the student discount?","Verify as a student with your college and ID. 20% comes off every ticket."],["Can I cancel a booking?","Yes. Open My bookings and tap Cancel and refund on an upcoming booking."],["How long do refunds take?","In this demo, refunds are instant. A live site would follow your bank or UPI timeline."],["What if an event is sold out?","Join the waitlist. You get an alert if seats open up."],["Can I combine discounts?","Student, group (5+ tickets) and promo discounts add up, up to the ticket total."]].map(([q,a])=>`<details class="card"><summary><b>${q}</b></summary><p class="meta">${a}</p></details>`).join("")}
+<h2>Contact us</h2><form onsubmit="event.preventDefault();event.target.reset();toast('Message sent. We will reply soon.')"><label>Your message</label><textarea required></textarea><p><button>Send</button></p></form>`,
+about:()=>`<h1>About EventHub</h1><p class="meta">EventHub helps students and locals find, book and manage campus and city events, with fair prices for verified students.</p><div class="grid"><div class="card"><b>${db.events.length}</b><div class="meta">events</div></div><div class="card"><b>${db.users.filter(u=>u.verified&&u.role!=="admin").length}</b><div class="meta">verified students</div></div><div class="card"><b>${db.bookings.filter(b=>b.status!=="cancelled").length}</b><div class="meta">bookings</div></div></div>`,
+admin:()=>`<div class="row" style="margin-bottom:16px">${[["dash","Dashboard"],["events","Events"],["checkin","Check-in"],["students","Students"],["promos","Promos"]].map(([k,v])=>`<button class="${ui.sub===k?"on":"ghost"}" onclick="ui.sub='${k}';render()">${v}</button>`).join("")}</div>${({dash:aDash,events:V.adminEvents,checkin:aCheck,students:aStu,promos:aPromo})[ui.sub]()}`,
+auth:()=>`<h1>${ui.reg?"Create account":"Log in"}</h1><p class="meta">Step 1 of 3: sign in. Next you verify as a student for 20% off.</p>
+<form onsubmit="auth(event)">${ui.reg?'<label>Full name</label><input name="name" required>':""}<label>Email</label><input name="email" type="email" required><label>Password</label><input name="pw" type="password" required>
+<p class="err">${ui.err}</p><button>${ui.reg?"Register":"Log in"}</button> <button type="button" class="ghost" onclick="ui.reg=!ui.reg;ui.err='';render()">${ui.reg?"I have an account":"New here? Register"}</button></form>
+<p class="meta">Your account is saved in this browser, so you can log in again next time.</p><p class="meta">Admin demo login: admin@eventhub.com / admin123</p>`,
+verify:()=>`<h1>Verify you are a student</h1><p class="meta">Step 2 of 3: verified students get 20% off every ticket.</p>`+(!ui.sent?
+`<form onsubmit="sendCode(event)"><label>College / University</label><input name="college" required><label>Student ID number</label><input name="sid" required><p class="err">${ui.err}</p><button>Send verification code</button></form>`:
+`<form onsubmit="confirmCode(event)"><label>6-digit code</label><input name="code" maxlength="6" required><p class="meta">Demo mode (no email server): your code is <b>${ui.code}</b></p><p class="err">${ui.err}</p><button>Verify</button></form>`)+
+`<p><button class="ghost" onclick="ui.skip=true;ui.err='';render()">Continue without discount</button></p>`,
+events:()=>`<h1>Upcoming events</h1><div class="row" style="margin-bottom:16px"><input id="q" placeholder="Search events or venues" value="${esc(ui.q)}" oninput="filt()"><select id="cat" onchange="filt()">${["All","Tech","Workshop","Sports","Business","Culture"].map(c=>`<option ${c===ui.cat?"selected":""}>${c}</option>`).join("")}</select><select id="so" onchange="filt()"><option value="date">Soonest</option><option value="price" ${ui.sort==="price"?"selected":""}>Price: low to high</option></select><select id="dr" onchange="filt()">${[["any","Any date"],["7","Next 7 days"],["wk","This weekend"],["30","Next 30 days"]].map(([v,t])=>`<option value="${v}" ${ui.dr===v?"selected":""}>${t}</option>`).join("")}</select><input id="mp" type="number" min="0" placeholder="Max price ₹" value="${ui.mp}" oninput="filt()"><label style="display:flex;gap:6px;align-items:center;margin:0"><input id="fr" type="checkbox" style="width:auto" ${ui.fr?"checked":""} onchange="filt()">Free only</label></div><div class="grid" id="grid">${grid()}</div>`,
+detail:()=>{const e=db.events.find(x=>x.id===ui.id);if(!e)return V.events();const l=e.cap-booked(e);
+return `<p><button class="ghost" onclick="go('events')">← All events</button></p><h1>${esc(e.title)}</h1><p class="meta">${fmt(e.date)} · ${esc(e.venue)} · <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(e.venue)}" target="_blank" rel="noopener" style="color:var(--pri)">View map</a></p>
+<div class="grid"><div class="card"><span class="badge">${esc(e.cat)}</span><p>${esc(e.desc)}</p><h3>Schedule</h3><ul class="meta"><li>Doors open 1 hour before start</li><li>Main session at ${new Date(e.date).toLocaleTimeString("en-IN",{timeStyle:"short"})}</li><li>Networking after the session</li></ul></div>
+<div class="card"><div class="big">${pt(e)} <span class="meta">/ ticket</span></div><div class="bar"><i style="width:${Math.min(100,booked(e)/e.cap*100)}%"></i></div><div class="meta">${booked(e)} booked · ${l>0?l+" seats left":"Sold out"}</div>
+<label>Tickets (max 10)</label><input id="dq" type="number" min="1" max="10" value="1"><p><button ${l>0?"":"disabled"} onclick="add('${e.id}',Math.max(1,Math.min(10,+$('#dq').value||1)))">Add to cart</button></p></div></div>`},
+cart:()=>{const u=me(),rows=db.cart.map(c=>({c,e:db.events.find(x=>x.id===c.id)})).filter(r=>r.e);
+if(!rows.length)return `<h1>Your cart</h1><p class="meta">Your cart is empty. Add events from the Events tab.</p>`+sug();
+const k=calc(rows.map(r=>({price:r.e.price,q:r.c.q}))),sub=k.sub,disc=k.disc;
+return `<h1>Your cart</h1>${rows.map(r=>`<div class="card row"><div><b>${esc(r.e.title)}</b><div class="meta">${fmt(r.e.date)}</div></div>
+<div><button class="ghost" onclick="qty('${r.e.id}',-1)">−</button> ${r.c.q} <button class="ghost" onclick="qty('${r.e.id}',1)">+</button></div><div>₹${r.e.price*r.c.q}</div><button class="ghost" onclick="rm('${r.e.id}')">Remove</button></div>`).join("")}
+<div class="card"><div class="tot"><span>Subtotal</span><span>₹${sub}</span></div>${k.lines}<div class="tot big"><span>Total</span><span>₹${sub-disc}</span></div></div>
+<div class="row" style="margin-top:12px;max-width:460px"><input id="pc" placeholder="Promo code (try STUDENT10)" value="${esc(ui.promo)}"><button class="ghost" onclick="applyPromo()" style="flex:0 0 auto">Apply</button></div><p class="meta">Buy 5 or more tickets for an extra 5% off.</p><h2>Payment details</h2><form onsubmit="checkout(event)"><label>Method</label><select id="pm" name="pm" onchange="payM()"><option value="card">Card</option><option value="upi">UPI</option></select>
+<div id="card"><label>Card number</label><input name="cn" inputmode="numeric" placeholder="4242 4242 4242 4242"><div class="row"><div><label>Expiry</label><input placeholder="MM/YY"></div><div><label>CVV</label><input type="password" maxlength="4"></div></div></div>
+<div id="upi" style="display:none"><label>UPI ID</label><input name="upi" placeholder="name@bank"></div><p class="err">${ui.err}</p><button>Pay ₹${sub-disc}</button></form>`},
+history:()=>{const l=db.bookings.filter(b=>b.uid===db.me).reverse().filter(b=>ui.bf==="all"||(ui.bf==="upcoming")===(b.status!=="cancelled"&&b.items.every(i=>i.date>Date.now())));return `<h1>My bookings</h1><div class="row" style="margin-bottom:12px">${["all","upcoming","past"].map(f=>`<button class="${ui.bf===f?"on":"ghost"}" onclick="ui.bf='${f}';render()">${f}</button>`).join("")}</div>${l.length?l.map(b=>{const c=b.status==="cancelled",up=b.items.every(i=>i.date>Date.now());
+return `<div class="card"><div class="tot"><b>Booked ${fmt(b.at)}</b><span class="badge">${c?"refunded":"paid"}</span></div>
+${b.items.map(i=>`<div class="meta">${esc(i.title)} · ${fmt(i.date)} · ${i.q} × ₹${i.price}</div>`).join("")}<div class="meta">Paid ₹${b.total}${b.disc?` (discounts −₹${b.disc})`:""} via ${b.pay.m.toUpperCase()} ${esc(b.pay.ref)}</div><div class="meta">Booking ID: ${b.id}</div><div style="margin-top:6px"><button class="ghost" onclick="rebook('${b.id}')">Book again</button></div>
+${c?`<div class="meta">Refund of ₹${b.total} to ${b.pay.m.toUpperCase()} ${esc(b.pay.ref)} initiated.</div>`:`<div class="row" style="margin-top:10px"><div id="qr${b.id}" style="background:#fff;padding:8px;border-radius:8px;flex:0 0 auto;min-width:0"></div>${up?`<button class="ghost" onclick="cancelB('${b.id}')">Cancel and refund</button>`:'<span class="meta">Show this QR at the gate.</span>'}</div>`}</div>`}).join(""):'<p class="meta">No bookings here yet.</p>'+sug()}`},
+adminEvents:()=>{const days={};sorted().forEach(e=>{(days[new Date(e.date).toDateString()]=days[new Date(e.date).toDateString()]||[]).push(e)});
+return `<h1>Admin: schedule and bookings</h1><div class="card row"><div><b>${db.bookings.filter(b=>b.status!=="cancelled").length}</b><div class="meta">total bookings</div></div><div><b>₹${db.bookings.filter(b=>b.status!=="cancelled").reduce((a,b)=>a+b.total,0)}</b><div class="meta">revenue</div></div></div>
+<h2>Add event</h2><form onsubmit="addEv(event)"><label>Title</label><input name="title" required><label>Category</label><select name="cat">${["Tech","Workshop","Sports","Business","Culture"].map(c=>`<option>${c}</option>`).join("")}</select>
+<label>Venue</label><input name="venue" required><label>Date and time</label><input name="date" type="datetime-local" required><div class="row"><div><label>Price (₹)</label><input name="price" type="number" min="0" value="0"></div><div><label>Capacity</label><input name="cap" type="number" min="1" value="100"></div></div>
+<label>Description</label><textarea name="desc"></textarea><p><button>Schedule event</button></p></form><h2>Schedule by date</h2>
+${Object.entries(days).map(([d,l])=>`<h3>${d}</h3>${l.map(e=>`<div class="card"><div class="tot"><b>${esc(e.title)}</b><span>${booked(e)}/${e.cap} booked</span></div><div class="meta">${esc(e.venue)} · ₹${e.price}</div>
+<div class="row" style="margin-top:8px"><input type="datetime-local" value="${li(e.date)}" onchange="resched('${e.id}',this.value)"><button class="ghost" onclick="who('${e.id}')">${ui.open===e.id?"Hide":"See"} attendees</button><button class="ghost" onclick="ui.edit=ui.edit==='${e.id}'?null:'${e.id}';render()">Edit</button><button class="ghost" onclick="delEv('${e.id}')">Delete</button></div>${ui.edit===e.id?editForm(e):""}
+${ui.open===e.id?attendees(e):""}</div>`).join("")}`).join("")}`}};
+function attendees(e){const r=[];db.bookings.filter(b=>b.status!=="cancelled").forEach(b=>b.items.filter(i=>i.eid===e.id).forEach(i=>{const u=db.users.find(x=>x.id===b.uid)||{};r.push(`<div class="meta">${esc(u.name||"?")} · ${esc(u.email||"")} · ${esc(u.college||"no college")} · ${i.q} ticket(s)</div>`)}));return r.length?r.join(""):'<div class="meta">No bookings yet.</div>'}
+
+function render(){const u=me(),hd=$("#hd"),app=$("#app"),tg='<button class="ghost" onclick="theme()">◐ Theme</button>';
+if(!u){hd.innerHTML='<span class="logo">EventHub</span>'+tg;app.innerHTML=V.auth();return}
+if(!u.verified&&!ui.skip&&u.role!=="admin"){hd.innerHTML='<span class="logo">EventHub</span>'+tg;app.innerHTML=V.verify();return}
+const n=db.cart.reduce((a,c)=>a+c.q,0),nu=(u.notes||[]).filter(x=>!x.read).length,T=[["home","Home"],["events","Events"],["calendar","Calendar"],["saved","Saved"],["cart","Cart ("+n+")"],["history","Bookings"],["alerts","Alerts"+(nu?" ("+nu+")":"")],["profile","Profile"],["help","Help"],["about","About"]];if(u.role==="admin")T.push(["admin","Admin"]);
+hd.innerHTML='<span class="logo">EventHub</span>'+T.map(([k,v])=>`<button class="${ui.tab===k?"on":"ghost"}" onclick="go('${k}')">${v}</button>`).join("")+(u.verified&&u.role!=="admin"?'<span class="badge">Student ✓ 20% off</span>':"")+'<button class="ghost" onclick="logout()">Log out</button>'+tg;
+app.innerHTML=V[ui.tab]();drawQR()}
+const sug=()=>`<h2>Suggested for you</h2><div class="grid">${sorted().filter(e=>e.date>Date.now()).slice(0,3).map(card).join("")}</div>`;
+function welcome(uid){notify(uid,"Tip: tap the heart on any event to save it.");notify(uid,"New events added: Open Source Meetup, Code & Chai, Career Fair and more.");notify(uid,"Welcome to EventHub! Verified students get 20% off every ticket.")}
+function migrate(){if((db.v||1)>=2)return;
+const at=(dow,h)=>{const d=new Date();d.setHours(h,0,0,0);let n=(dow-d.getDay()+7)%7;if(n===0&&d.getTime()<Date.now())n=7;d.setDate(d.getDate()+n);return d.getTime()};
+const f=(n,h)=>{const d=new Date(Date.now()+n*D);d.setHours(h,0,0,0);return d.getTime()};
+[["Open Source Meetup","Tech","IIT Bombay, Powai",at(6,11),0,80,"Lightning talks and a first-contribution clinic."],
+["Code & Chai","Tech","Café Coder, Andheri",at(0,17),50,40,"A relaxed coding session with snacks."],
+["Poetry Open Mic","Culture","Prithvi Café, Juhu",at(6,18),0,60,"Read your own work or just listen."],
+["5K Fun Run","Sports","Marine Drive",at(0,6),100,200,"A friendly morning run along the seafront."],
+["Football League Finals","Sports","Oval Maidan",f(4,16),80,500,"The inter-college final, with food stalls."],
+["Film Screening Night","Culture","Campus Amphitheatre",f(3,19),60,150,"Open-air screening of a festival favourite."],
+["Financial Literacy Talk","Business","Nariman Point Hall",f(8,17),0,100,"Budgeting, saving and investing basics for students."],
+["Photography Walk","Workshop","Colaba Causeway",f(6,7),200,25,"Golden-hour street photography with a mentor."],
+["Startup Networking Mixer","Business","BKC Hub",f(9,18),150,120,"Meet founders, interns and investors."],
+["Career Fair","Business","Mumbai University",f(12,10),0,400,"50+ companies hiring for internships and jobs."],
+["Stand-up Comedy Night","Culture","Canvas Laugh Club",f(16,20),350,90,"Five comedians, one evening of laughs."],
+["Web Dev Bootcamp","Workshop","Innovation Lab, Powai",f(5,10),700,35,"Build and deploy a website in one day."],
+["Cybersecurity CTF","Tech","VJTI, Matunga",f(25,9),0,150,"Team capture-the-flag with prizes."],
+["Robotics Expo","Tech","NSCI Dome, Worli",f(40,10),120,600,"Student robots, demos and workshops."],
+["Freshers Welcome","Culture","Campus Ground",f(-10,17),200,300,"The welcome party for new students."]].forEach((x,i)=>{if(!db.events.some(e=>e.id==="n"+(i+1)))db.events.push({id:"n"+(i+1),title:x[0],cat:x[1],venue:x[2],date:x[3],price:x[4],cap:x[5],desc:x[6]})});
+[["Aarav Mehta","St. Xavier's College"],["Diya Nair","Mithibai College"],["Rohan Iyer","VJTI"],["Sara Khan","NMIMS"],["Kabir Shah","IIT Bombay"]].forEach(([n,c],i)=>{if(!db.users.some(u=>u.id==="d"+i))db.users.push({id:"d"+i,name:n,email:n.split(" ")[0].toLowerCase()+"@demo.com",pw:"demo"+i+"x",role:"user",verified:true,college:c,sid:"S"+(1000+i)})});
+[[0,"e1",2,6],[1,"e1",1,5],[2,"e2",1,4],[3,"n1",2,3],[4,"n3",1,3],[0,"n4",1,2],[1,"n5",3,2],[2,"n6",2,1],[3,"e3",5,1],[4,"n2",1,0],[0,"n15",2,9,1],[1,"n15",1,9,1],[2,"n15",1,8,1]].forEach(([ux,eid,q,ago,arr],k)=>{const e=db.events.find(x=>x.id===eid);if(!e||db.bookings.some(b=>b.id==="BD"+k))return;
+const sub=e.price*q,disc=Math.round(sub*.2)+(q>=5?Math.round(sub*.05):0);db.bookings.push({id:"BD"+k,uid:"d"+ux,items:[{eid,title:e.title,date:e.date,q,price:e.price}],sub,disc,total:sub-disc,pay:{m:"upi",ref:"demo@upi"},at:Date.now()-ago*D,arrived:!!arr})});
+db.users.forEach(u=>{if(u.id[0]!=="d"&&!(u.notes&&u.notes.length))welcome(u.id)});db.v=2;save()}
+migrate();render();if(!canStore)$("#warn").style.display="block";try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
+addEventListener("pagehide",save);
+</script></body></html>
